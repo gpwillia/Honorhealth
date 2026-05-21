@@ -12,10 +12,10 @@ const officers = Array.from({ length: officerCount }, (_, i) => ({
 }));
 
 const locations = [
-  "Hospital North",
-  "Hospital East",
-  "Hospital South",
-  "Hospital West"
+  "Deer Valley",
+  "TMC",
+  "JCL",
+  "Hospital (New)"
 ];
 
 async function main() {

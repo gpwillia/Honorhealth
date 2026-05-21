@@ -54,7 +54,7 @@ html {
 
 .brandBanner img {
   display: block;
-  height: 34px;
+  height: 46px;
   width: auto;
 }
 
@@ -98,6 +98,7 @@ h1 {
   color: var(--hh-purple-deep);
 }
 
+.userPicker input,
 select {
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -144,6 +145,27 @@ select {
   color: var(--hh-purple);
 }
 
+.policyLink {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: var(--hh-purple-deep);
+  border: 1px solid transparent;
+  padding: 6px 8px;
+  border-radius: 8px;
+  text-decoration: underline;
+  text-decoration-color: #ab82c2;
+  text-underline-offset: 3px;
+  font-weight: 600;
+}
+
+.policyLink:hover {
+  background: var(--hh-lilac);
+  border-color: #d8c3e7;
+  filter: none;
+  transform: none;
+}
+
 .policyDetails {
   margin-top: 14px;
   padding-top: 12px;
@@ -166,6 +188,45 @@ select {
   margin: 0;
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.policyModalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(24, 8, 34, 0.55);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  z-index: 1000;
+}
+
+.policyModal {
+  width: min(680px, 100%);
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px;
+  box-shadow: 0 20px 45px rgba(38, 8, 58, 0.3);
+}
+
+.policyModalHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.policyModalHeader h3 {
+  margin: 0;
+  color: var(--hh-purple-deep);
+  font-size: 1.35rem;
+}
+
+.policyModal p {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1.45;
 }
 
 .card {

@@ -19,7 +19,7 @@ async function resetDatabase(): Promise<void> {
         currentOfficerId: "officerA",
         startAt: new Date("2026-05-21T08:00:00.000Z"),
         endAt: new Date("2026-05-21T16:00:00.000Z"),
-        location: "Hospital North",
+        location: "Deer Valley",
         roleRequired: "Security Officer",
         armedRequired: false,
         status: "Assigned"
@@ -29,7 +29,7 @@ async function resetDatabase(): Promise<void> {
         currentOfficerId: "officerB",
         startAt: new Date("2026-05-22T16:00:00.000Z"),
         endAt: new Date("2026-05-23T00:00:00.000Z"),
-        location: "Hospital East",
+        location: "TMC",
         roleRequired: "Security Officer",
         armedRequired: true,
         status: "Assigned"

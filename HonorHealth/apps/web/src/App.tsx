@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   approveRequest,
   createTradeRequest,
@@ -11,6 +11,59 @@ import {
 } from "./api";
 import type { Shift, TradeRequest } from "./types";
 
+interface PolicyRule {
+  id: string;
+  title: string;
+  description: string;
+}
+
+const policyRules: PolicyRule[] = [
+  {
+    id: "policy-ownership",
+    title: "Shift Ownership and Posting Eligibility",
+    description:
+      "Only the officer assigned to a shift can post it, and only when the shift is currently Assigned."
+  },
+  {
+    id: "policy-status",
+    title: "Posted Shift Required for Requests",
+    description: "Officers can request pickup only for shifts with status Posted."
+  },
+  {
+    id: "policy-self-request",
+    title: "No Self-Request",
+    description: "An officer cannot request pickup for their own posted shift."
+  },
+  {
+    id: "policy-role",
+    title: "Role Qualification Check",
+    description: "The requesting officer must hold the role required by the shift."
+  },
+  {
+    id: "policy-armed",
+    title: "Armed Qualification Check",
+    description:
+      "If a shift requires armed qualification, only officers marked armed-qualified pass validation."
+  },
+  {
+    id: "policy-rest-ot",
+    title: "Rest and Overtime Check (12-hour max)",
+    description:
+      "The request fails if it overlaps another same-day shift or would exceed 12 total working hours that day."
+  },
+  {
+    id: "policy-conflict",
+    title: "One Active Pending Request per Shift",
+    description: "Only one pending request can exist for a posted shift at a time."
+  },
+  {
+    id: "policy-supervisor",
+    title: "Supervisor Approval Required",
+    description:
+      "Only a supervisor can approve or deny pending requests, and approval reruns validation checks."
+  }
+];
+
 function formatRange(startAt: string, endAt: string): string {
   const start = new Date(startAt).toLocaleString();
   const end = new Date(endAt).toLocaleString();
@@ -19,16 +72,71 @@ function formatRange(startAt: string, endAt: string): string {
 
 export function App() {
   const [activeUserId, setActiveUserId] = useState("officer1");
+  const [userSearch, setUserSearch] = useState("");
   const [myShifts, setMyShifts] = useState<Shift[]>([]);
   const [tradeBoard, setTradeBoard] = useState<Shift[]>([]);
   const [queue, setQueue] = useState<TradeRequest[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [activePolicyId, setActivePolicyId] = useState<string | null>(null);
+  const userSearchRef = useRef<HTMLInputElement | null>(null);
 
   const currentUser = useMemo(
     () => userChoices.find((item) => item.id === activeUserId) ?? userChoices[0],
     [activeUserId]
   );
+
+  const activePolicy = useMemo(
+    () => policyRules.find((policy) => policy.id === activePolicyId) ?? null,
+    [activePolicyId]
+  );
+
+  const filteredUserChoices = useMemo(() => {
+    const query = userSearch.trim().toLowerCase();
+
+    if (!query) {
+      return userChoices;
+    }
+
+    return userChoices.filter((choice) => {
+      const label = choice.label.toLowerCase();
+      const role = choice.role.toLowerCase();
+      const id = choice.id.toLowerCase();
+      return label.includes(query) || role.includes(query) || id.includes(query);
+    });
+  }, [userSearch]);
+
+  const selectedUserId = useMemo(() => {
+    const hasSelected = filteredUserChoices.some((choice) => choice.id === activeUserId);
+    return hasSelected ? activeUserId : "";
+  }, [activeUserId, filteredUserChoices]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent): void {
+      if (event.key !== "/") {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName.toLowerCase();
+      const isEditable =
+        tagName === "input" ||
+        tagName === "textarea" ||
+        tagName === "select" ||
+        target?.isContentEditable;
+
+      if (isEditable) {
+        return;
+      }
+
+      event.preventDefault();
+      userSearchRef.current?.focus();
+      userSearchRef.current?.select();
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   async function loadData() {
     setError(null);
@@ -118,7 +226,7 @@ export function App() {
     <main className="app">
       <header className="topShell">
         <div className="brandBanner" role="img" aria-label="HonorHealth banner">
-          <img src="/honorhealth-banner.svg" alt="HonorHealth" />
+          <img src="/honor-health-logo.png" alt="HonorHealth" />
         </div>
 
         <div className="headerRow">
@@ -130,12 +238,35 @@ export function App() {
 
           <label className="userPicker">
             <span>Active user</span>
-            <select value={activeUserId} onChange={(e) => setActiveUserId(e.target.value)}>
-              {userChoices.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label} ({option.role})
+            <input
+              ref={userSearchRef}
+              type="search"
+              placeholder="Search officer by name or id"
+              value={userSearch}
+              onChange={(e) => setUserSearch(e.target.value)}
+              aria-label="Search active user list"
+            />
+            <select
+              value={selectedUserId}
+              onChange={(e) => {
+                if (!e.target.value) {
+                  return;
+                }
+
+                setActiveUserId(e.target.value);
+              }}
+            >
+              {filteredUserChoices.length > 0 ? (
+                filteredUserChoices.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label} ({option.role})
+                  </option>
+                ))
+              ) : (
+                <option value="" disabled>
+                  No matches found
                 </option>
-              ))}
+              )}
             </select>
           </label>
         </div>
@@ -149,51 +280,19 @@ export function App() {
           <h2>Validation Policies</h2>
           <nav aria-label="Trade validation rules">
             <ul className="policyList">
-              <li><a href="#policy-ownership">Shift Ownership and Posting Eligibility</a></li>
-              <li><a href="#policy-status">Posted Shift Required for Requests</a></li>
-              <li><a href="#policy-self-request">No Self-Request</a></li>
-              <li><a href="#policy-role">Role Qualification Check</a></li>
-              <li><a href="#policy-armed">Armed Qualification Check</a></li>
-              <li><a href="#policy-rest-ot">Rest and Overtime Check (12-hour max)</a></li>
-              <li><a href="#policy-conflict">One Active Pending Request per Shift</a></li>
-              <li><a href="#policy-supervisor">Supervisor Approval Required</a></li>
+              {policyRules.map((policy) => (
+                <li key={policy.id}>
+                  <button
+                    className="policyLink"
+                    type="button"
+                    onClick={() => setActivePolicyId(policy.id)}
+                  >
+                    {policy.title}
+                  </button>
+                </li>
+              ))}
             </ul>
           </nav>
-
-          <div className="policyDetails">
-            <section id="policy-ownership">
-              <h3>Shift Ownership and Posting Eligibility</h3>
-              <p>Only the officer assigned to a shift can post it, and only when the shift is currently Assigned.</p>
-            </section>
-            <section id="policy-status">
-              <h3>Posted Shift Required for Requests</h3>
-              <p>Officers can request pickup only for shifts with status Posted.</p>
-            </section>
-            <section id="policy-self-request">
-              <h3>No Self-Request</h3>
-              <p>An officer cannot request pickup for their own posted shift.</p>
-            </section>
-            <section id="policy-role">
-              <h3>Role Qualification Check</h3>
-              <p>The requesting officer must hold the role required by the shift.</p>
-            </section>
-            <section id="policy-armed">
-              <h3>Armed Qualification Check</h3>
-              <p>If a shift requires armed qualification, only officers marked armed-qualified pass validation.</p>
-            </section>
-            <section id="policy-rest-ot">
-              <h3>Rest and Overtime Check</h3>
-              <p>The request fails if it overlaps another same-day shift or would exceed 12 total working hours that day.</p>
-            </section>
-            <section id="policy-conflict">
-              <h3>One Active Pending Request per Shift</h3>
-              <p>Only one pending request can exist for a posted shift at a time.</p>
-            </section>
-            <section id="policy-supervisor">
-              <h3>Supervisor Approval Required</h3>
-              <p>Only a supervisor can approve or deny pending requests, and approval reruns validation checks.</p>
-            </section>
-          </div>
         </aside>
 
         <div className="grid">
@@ -257,6 +356,26 @@ export function App() {
           ) : null}
         </div>
       </section>
+
+      {activePolicy ? (
+        <div className="policyModalBackdrop" role="presentation" onClick={() => setActivePolicyId(null)}>
+          <div
+            className="policyModal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="policy-modal-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="policyModalHeader">
+              <h3 id="policy-modal-title">{activePolicy.title}</h3>
+              <button type="button" className="secondary" onClick={() => setActivePolicyId(null)}>
+                Close
+              </button>
+            </div>
+            <p>{activePolicy.description}</p>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

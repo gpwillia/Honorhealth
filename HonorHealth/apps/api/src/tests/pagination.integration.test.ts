@@ -19,7 +19,7 @@ async function resetDatabase(): Promise<void> {
         currentOfficerId: "officerA",
         startAt: new Date("2026-05-21T08:00:00.000Z"),
         endAt: new Date("2026-05-21T16:00:00.000Z"),
-        location: "Hospital North",
+        location: "Deer Valley",
         roleRequired: "Security Officer",
         armedRequired: false,
         status: "Posted"
@@ -29,7 +29,7 @@ async function resetDatabase(): Promise<void> {
         currentOfficerId: "officerA",
         startAt: new Date("2026-05-22T08:00:00.000Z"),
         endAt: new Date("2026-05-22T16:00:00.000Z"),
-        location: "Hospital North",
+        location: "Deer Valley",
         roleRequired: "Security Officer",
         armedRequired: false,
         status: "Posted"
@@ -39,7 +39,7 @@ async function resetDatabase(): Promise<void> {
         currentOfficerId: "officerB",
         startAt: new Date("2026-05-23T08:00:00.000Z"),
         endAt: new Date("2026-05-23T16:00:00.000Z"),
-        location: "Hospital East",
+        location: "TMC",
         roleRequired: "Security Officer",
         armedRequired: true,
         status: "Posted"
@@ -63,7 +63,7 @@ describe("API pagination and filters", () => {
 
   it("paginates and filters trade board posts", async () => {
     const firstPage = await request(app)
-      .get("/api/trade-board/posts?location=Hospital%20North&page=1&pageSize=1")
+      .get("/api/trade-board/posts?location=Deer%20Valley&page=1&pageSize=1")
       .set("x-user-id", "supervisor1");
 
     expect(firstPage.status).toBe(200);
@@ -74,7 +74,7 @@ describe("API pagination and filters", () => {
     expect(firstPage.body[0].id).toBe("shift_1");
 
     const secondPage = await request(app)
-      .get("/api/trade-board/posts?location=Hospital%20North&page=2&pageSize=1")
+      .get("/api/trade-board/posts?location=Deer%20Valley&page=2&pageSize=1")
       .set("x-user-id", "supervisor1");
 
     expect(secondPage.status).toBe(200);
