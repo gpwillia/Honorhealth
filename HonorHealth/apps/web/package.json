@@ -1,0 +1,32 @@
+{
+  "name": "@honorhealth/web",
+  "version": "1.0.0",
+  "description": "Security Shift Trade Board frontend",
+  "main": "src/main.tsx",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json && vite build",
+    "preview": "vite preview",
+    "lint": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "react",
+    "vite",
+    "trade-board"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "vitest": "^2.1.8",
+    "vite": "^5.4.11"
+  }
+}

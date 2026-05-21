@@ -1,0 +1,90 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Shift {
+  id               String         @id @default(cuid())
+  currentOfficerId String
+  startAt          DateTime
+  endAt            DateTime
+  location         String
+  roleRequired     String
+  armedRequired    Boolean
+  status           String         @default("Assigned")
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  tradeRequests    TradeRequest[]
+
+  @@index([currentOfficerId])
+  @@index([status])
+}
+
+model TradeRequest {
+  id                  String             @id @default(cuid())
+  shiftId             String
+  postingOfficerId    String
+  requestingOfficerId String
+  status              String
+  submittedAt         DateTime           @default(now())
+  reviewedAt          DateTime?
+  reviewedBy          String?
+  denialReason        String?
+  shift               Shift              @relation(fields: [shiftId], references: [id])
+  validations         ValidationResult[]
+  auditLogs           AuditLog[]
+
+  @@index([shiftId])
+  @@index([status])
+}
+
+model ValidationResult {
+  id         String   @id @default(cuid())
+  requestId  String
+  armedCheck Boolean
+  roleCheck  Boolean
+  restOtCheck Boolean
+  overallPass Boolean
+  details    String
+  evaluatedAt DateTime @default(now())
+  request    TradeRequest @relation(fields: [requestId], references: [id])
+
+  @@index([requestId])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  requestId  String?
+  actorId    String
+  action     String
+  fromStatus String?
+  toStatus   String?
+  metadata   String?
+  timestamp  DateTime @default(now())
+  request    TradeRequest? @relation(fields: [requestId], references: [id])
+
+  @@index([requestId])
+  @@index([timestamp])
+}
+
+model Notification {
+  id             String   @id @default(cuid())
+  recipientId    String
+  channel        String
+  template       String
+  sentAt         DateTime?
+  deliveryStatus String
+  attempts       Int      @default(0)
+  lastError      String?
+  nextAttemptAt  DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([recipientId])
+  @@index([deliveryStatus])
+  @@index([nextAttemptAt])
+}

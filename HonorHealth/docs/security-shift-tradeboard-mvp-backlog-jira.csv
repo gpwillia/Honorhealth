@@ -1,0 +1,25 @@
+Issue Type,Summary,Epic Name,Description,Priority,Story Points,Labels
+Epic,EPIC A: Platform Foundation,EPIC A: Platform Foundation,"Baseline architecture, auth, and schema.",Highest,,mvp security-trade-board
+Story,A1 Project scaffolding and environments,EPIC A: Platform Foundation,"Create backend/frontend skeleton, env config, CI lint/tests.",Highest,5,mvp backend frontend
+Story,A2 Authentication and RBAC,EPIC A: Platform Foundation,"Implement Officer/Supervisor access control in API and UI.",Highest,8,mvp backend security
+Story,A3 Data model and migrations,EPIC A: Platform Foundation,"Add Shift, TradeRequest, ValidationResult, AuditLog, Notification models.",Highest,8,mvp backend database
+Epic,EPIC B: Shift Posting and Trade Board,EPIC B: Shift Posting and Trade Board,"Posting and browse posted shifts.",Highest,,mvp security-trade-board
+Story,B1 My Shifts endpoint and UI list,EPIC B: Shift Posting and Trade Board,"Show officer-owned shifts eligible for posting.",Highest,5,mvp backend frontend
+Story,B2 Post shift to trade board,EPIC B: Shift Posting and Trade Board,"Post eligible shift with duplicate-post prevention.",Highest,5,mvp backend
+Story,B3 Trade board listing and filters,EPIC B: Shift Posting and Trade Board,"Paginated board with filter/sort.",Highest,5,mvp frontend backend
+Epic,EPIC C: Pickup Request and Validation,EPIC C: Pickup Request and Validation,"Request flow and eligibility checks.",Highest,,mvp validation
+Story,C1 Create TradeRequest from posted shift,EPIC C: Pickup Request and Validation,"Create request and move status to PendingApproval.",Highest,8,mvp backend
+Story,C2 Validation service armed role restOT,EPIC C: Pickup Request and Validation,"Rule engine and persisted validation outcomes.",Highest,13,mvp backend validation
+Story,C3 Concurrency and request locking,EPIC C: Pickup Request and Validation,"Prevent multiple active requests for one shift.",Highest,8,mvp backend database
+Epic,EPIC D: Supervisor Approval Workflow,EPIC D: Supervisor Approval Workflow,"Queue, approve, deny, reassignment.",Highest,,mvp approval
+Story,D1 Approval queue,EPIC D: Supervisor Approval Workflow,"Supervisor queue with validation summary.",Highest,5,mvp frontend backend
+Story,D2 Approve request transaction,EPIC D: Supervisor Approval Workflow,"Atomic validation, reassignment, approve, audit, notify enqueue.",Highest,13,mvp backend approval
+Story,D3 Deny request path,EPIC D: Supervisor Approval Workflow,"Deny with reason, audit and notifications.",Highest,5,mvp backend approval
+Epic,EPIC E: Audit Notifications History,EPIC E: Audit Notifications History,"Traceability and communication.",High,,mvp audit notifications
+Story,E1 Audit logging framework,EPIC E: Audit Notifications History,"Immutable event log for all transitions.",Highest,8,mvp backend audit
+Story,E2 Notification service integration,EPIC E: Audit Notifications History,"Async notifications with retry and failure logging.",High,8,mvp backend notifications
+Story,E3 Request detail timeline,EPIC E: Audit Notifications History,"UI timeline and request history endpoint.",High,5,mvp frontend backend
+Epic,EPIC F: Quality Security Release Readiness,EPIC F: Quality Security Release Readiness,"Testing, security checks, observability, runbook.",High,,mvp quality security
+Story,F1 Test automation suite,EPIC F: Quality Security Release Readiness,"Unit/integration/E2E for critical workflow.",Highest,13,mvp testing
+Story,F2 Security and compliance checks,EPIC F: Quality Security Release Readiness,"RBAC tests, PII masking, input validation checks.",Highest,5,mvp security
+Story,F3 Observability and runbook,EPIC F: Quality Security Release Readiness,"Metrics/alerts and support runbook.",High,5,mvp operations

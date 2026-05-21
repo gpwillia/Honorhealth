@@ -1,0 +1,44 @@
+{
+  "name": "@honorhealth/api",
+  "version": "1.0.0",
+  "description": "Security Shift Trade Board API",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "worker:notifications": "tsx src/workers/notificationWorker.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "test:integration": "cross-env DATABASE_URL=file:./test.db prisma migrate reset --force --skip-generate --skip-seed && cross-env DATABASE_URL=file:./test.db vitest run src/tests/workflow.integration.test.ts && cross-env DATABASE_URL=file:./test.db vitest run src/tests/pagination.integration.test.ts && cross-env DATABASE_URL=file:./test.db vitest run src/tests/notification-dispatch.integration.test.ts",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:seed": "tsx prisma/seed.ts"
+  },
+  "keywords": [
+    "api",
+    "express",
+    "trade-board"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.1",
+    "@types/supertest": "^6.0.3",
+    "cross-env": "^7.0.3",
+    "prisma": "^5.22.0",
+    "supertest": "^7.1.1",
+    "tsx": "^4.19.2",
+    "vitest": "^2.1.8"
+  }
+}
