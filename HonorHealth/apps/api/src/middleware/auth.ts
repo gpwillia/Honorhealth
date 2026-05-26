@@ -16,11 +16,13 @@ const generatedOfficers = Array.from({ length: 20 }, (_, i) => {
   };
 });
 
-const userDirectory: Record<string, RequestUser> = {
+export const userDirectory: Record<string, RequestUser> = {
   ...Object.fromEntries(generatedOfficers.map((officer) => [officer.id, officer])),
   officerA: { id: "officerA", role: "Officer", name: "Officer A" },
   officerB: { id: "officerB", role: "Officer", name: "Officer B" },
-  supervisor1: { id: "supervisor1", role: "Supervisor", name: "Darren Viner" }
+  supervisor1: { id: "supervisor1", role: "Supervisor", name: "Supervisor 1" },
+  supervisor2: { id: "supervisor2", role: "Supervisor", name: "Supervisor 2" },
+  supervisor3: { id: "supervisor3", role: "Supervisor", name: "Supervisor 3" }
 };
 
 export function mockAuth(req: Request, _res: Response, next: NextFunction): void {

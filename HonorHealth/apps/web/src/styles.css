@@ -90,6 +90,12 @@ h1 {
   font-size: 0.96rem;
 }
 
+.tabRow {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 .userPicker {
   display: flex;
   flex-direction: column;
@@ -106,6 +112,15 @@ select {
   background: #fff;
   color: var(--text);
   min-width: 250px;
+}
+
+.filterRow input,
+.formGrid input {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: #fff;
+  color: var(--text);
 }
 
 .workspaceLayout {
@@ -229,6 +244,48 @@ select {
   line-height: 1.45;
 }
 
+.filterRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+  align-items: end;
+}
+
+.filterRow label,
+.formGrid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-weight: 600;
+  color: var(--hh-purple-deep);
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.timelineDay h3 {
+  margin: 0 0 8px;
+  color: var(--hh-purple-deep);
+  font-size: 1.05rem;
+}
+
+.checkboxField {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+  margin-top: 20px;
+}
+
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -261,6 +318,45 @@ select {
 .meta {
   font-size: 0.9rem;
   color: var(--muted);
+}
+
+.approvalHistory {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.overridePanel {
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #f9f4fc;
+}
+
+.overrideToggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--hh-purple-deep);
+}
+
+.overrideReason {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-weight: 600;
+  color: var(--hh-purple-deep);
+}
+
+.overrideReason input {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: #fff;
+  color: var(--text);
 }
 
 button {

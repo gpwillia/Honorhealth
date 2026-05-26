@@ -6,6 +6,7 @@ import { mockAuth } from "./middleware/auth.js";
 import { errorHandler, notFound } from "./middleware/errors.js";
 import { notificationRouter } from "./routes/notifications.js";
 import { healthRouter } from "./routes/health.js";
+import { scheduleRouter } from "./routes/schedule.js";
 import { shiftRouter } from "./routes/shifts.js";
 import { tradeRequestRouter } from "./routes/tradeRequests.js";
 
@@ -33,6 +34,7 @@ export function buildApp() {
 
   app.use(healthRouter);
   app.use("/api", shiftRouter);
+  app.use("/api", scheduleRouter);
   app.use("/api", tradeRequestRouter);
   app.use("/api", notificationRouter);
 

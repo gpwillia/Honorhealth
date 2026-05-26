@@ -12,6 +12,19 @@ const denyRequestSchema = z.object({
   reason: z.string().max(500).optional()
 });
 
+const approveRequestSchema = z.object({
+  bypassValidation: z.boolean().optional().default(false),
+  bypassReason: z.string().max(500).optional()
+}).superRefine((value, ctx) => {
+  if (value.bypassValidation && !value.bypassReason?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["bypassReason"],
+      message: "Bypass reason is required when bypassValidation is enabled."
+    });
+  }
+});
+
 const tradeRequestQuerySchema = z.object({
   status: z.string().optional(),
   page: z.coerce.number().int().min(1).default(1),
@@ -178,6 +191,13 @@ tradeRequestRouter.post(
   "/trade-requests/:id/approve",
   requireRole(["Supervisor"]),
   async (req, res) => {
+    const parsed = approveRequestSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      res.status(400).json({ code: "INVALID_INPUT", message: parsed.error.message });
+      return;
+    }
+
     try {
       const result = await prisma.$transaction(async (tx) => {
         const request = await tx.tradeRequest.findUnique({ where: { id: req.params.id } });
@@ -209,7 +229,10 @@ tradeRequestRouter.post(
           }
         });
 
-        if (!validationComputation.overallPass) {
+        const bypassValidation = parsed.data.bypassValidation;
+        const bypassReason = parsed.data.bypassReason?.trim() || null;
+
+        if (!validationComputation.overallPass && !bypassValidation) {
           throw new Error("Validation failed. Approval blocked.");
         }
 
@@ -217,7 +240,8 @@ tradeRequestRouter.post(
           where: { id: request.shiftId },
           data: {
             currentOfficerId: request.requestingOfficerId,
-            status: "Assigned"
+            status: "Assigned",
+            lastSyncedAt: new Date()
           }
         });
 
@@ -234,10 +258,14 @@ tradeRequestRouter.post(
           data: {
             requestId: request.id,
             actorId: req.user!.id,
-            action: "REQUEST_APPROVED",
+            action: bypassValidation ? "REQUEST_APPROVED_BYPASS" : "REQUEST_APPROVED",
             fromStatus: "PendingApproval",
             toStatus: "Approved",
-            metadata: JSON.stringify({ shiftId: request.shiftId })
+            metadata: JSON.stringify({
+              shiftId: request.shiftId,
+              bypassValidation,
+              bypassReason
+            })
           }
         });
 

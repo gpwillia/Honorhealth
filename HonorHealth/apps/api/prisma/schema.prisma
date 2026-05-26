@@ -16,12 +16,18 @@ model Shift {
   roleRequired     String
   armedRequired    Boolean
   status           String         @default("Assigned")
+  scheduledById    String?
+  sourceType       String         @default("Manual")
+  notes            String?
+  lastSyncedAt     DateTime?
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
   tradeRequests    TradeRequest[]
 
   @@index([currentOfficerId])
   @@index([status])
+  @@index([startAt])
+  @@index([endAt])
 }
 
 model TradeRequest {

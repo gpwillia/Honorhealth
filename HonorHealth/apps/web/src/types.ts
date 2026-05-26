@@ -13,6 +13,19 @@ export interface Shift {
   reason?: string | null;
 }
 
+export interface ScheduleShift extends Shift {
+  scheduledById?: string | null;
+  sourceType?: string;
+  notes?: string | null;
+  lastSyncedAt?: string | null;
+}
+
+export interface Officer {
+  id: string;
+  role: UserRole;
+  name: string;
+}
+
 export interface ValidationResult {
   id: string;
   armedCheck: boolean;
@@ -27,6 +40,8 @@ export interface TradeRequest {
   postingOfficerId: string;
   requestingOfficerId: string;
   status: "PendingApproval" | "Approved" | "Denied";
+  reviewedAt?: string | null;
+  reviewedBy?: string | null;
   denialReason?: string;
   shift: Shift;
   validations: ValidationResult[];
