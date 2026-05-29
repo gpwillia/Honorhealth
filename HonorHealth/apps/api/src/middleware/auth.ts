@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
+import { assignHomeSite } from "../domain/homeSites.js";
 import type { RequestUser, UserRole } from "../domain/types.js";
 
 declare module "express-serve-static-core" {
@@ -12,14 +13,15 @@ const generatedOfficers = Array.from({ length: 20 }, (_, i) => {
   return {
     id: `officer${officerNumber}`,
     role: "Officer" as const,
-    name: `Officer ${officerNumber}`
+    name: `Officer ${officerNumber}`,
+    homeSite: assignHomeSite(`officer${officerNumber}`)
   };
 });
 
 export const userDirectory: Record<string, RequestUser> = {
   ...Object.fromEntries(generatedOfficers.map((officer) => [officer.id, officer])),
-  officerA: { id: "officerA", role: "Officer", name: "Officer A" },
-  officerB: { id: "officerB", role: "Officer", name: "Officer B" },
+  officerA: { id: "officerA", role: "Officer", name: "Officer A", homeSite: assignHomeSite("officerA") },
+  officerB: { id: "officerB", role: "Officer", name: "Officer B", homeSite: assignHomeSite("officerB") },
   supervisor1: { id: "supervisor1", role: "Supervisor", name: "Supervisor 1" },
   supervisor2: { id: "supervisor2", role: "Supervisor", name: "Supervisor 2" },
   supervisor3: { id: "supervisor3", role: "Supervisor", name: "Supervisor 3" }

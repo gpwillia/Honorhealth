@@ -127,7 +127,10 @@ describe("Security Shift Trade Board workflow", () => {
       .send({});
 
     expect(approveResponse.status).toBe(409);
-    expect(approveResponse.body.code).toBe("APPROVAL_FAILED");
+    expect(approveResponse.body.code).toBe("APPROVAL_BLOCKED");
+    expect(approveResponse.body.validation.requestId).toBe(createRequestResponse.body.id);
+    expect(approveResponse.body.validation.canApprove).toBe(false);
+    expect(approveResponse.body.validation.reasons.length).toBeGreaterThan(0);
 
     const denyResponse = await request(app)
       .post(`/api/trade-requests/${createRequestResponse.body.id}/deny`)

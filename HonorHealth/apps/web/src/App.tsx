@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ApiError,
   approveRequest,
   createSchedule,
   createTradeRequest,
   denyRequest,
+  getCurrentApprovalValidation,
+  getAnalytics,
   getOfficers,
   getSchedule,
   getMyShifts,
@@ -14,13 +17,26 @@ import {
   updateSchedule,
   userChoices
 } from "./api";
-import type { Officer, ScheduleShift, Shift, TradeRequest } from "./types";
+import {
+  isScheduleTemplateId,
+  scheduleTemplates,
+  type ScheduleTemplateId
+} from "./scheduleTemplates";
+import type { CurrentApprovalValidation, Officer, ScheduleShift, Shift, TradeRequest } from "./types";
+import type { AnalyticsResponse } from "./types";
 
 interface PolicyRule {
   id: string;
   title: string;
   description: string;
 }
+
+interface AnalyticsGoal {
+  title: string;
+  description: string;
+}
+
+type AnalyticsView = "weekly" | "monthly" | "yearly" | "custom";
 
 const policyRules: PolicyRule[] = [
   {
@@ -69,6 +85,29 @@ const policyRules: PolicyRule[] = [
   }
 ];
 
+const analyticsGoals: AnalyticsGoal[] = [
+  {
+    title: "Improve coverage reliability across all sites",
+    description: "Reduce unfilled shifts and last-minute scrambles by making open shifts visible, requestable, and trackable."
+  },
+  {
+    title: "Create a defensible business case for staffing and budget",
+    description: "Quantify unmet demand, approval bottlenecks, and policy constraints to justify hiring and targeted budget."
+  },
+  {
+    title: "Reduce operational and compliance risk",
+    description: "Enforce role, armed, and rest/OT rules consistently with an audit trail for every trade, request, and approval."
+  },
+  {
+    title: "Enable smarter cross-site resource planning",
+    description: "Use coverage data to show where bench strength is thin and where redundancy is needed."
+  },
+  {
+    title: "Target training spends where it moves the needle",
+    description: "Turn denial reasons and qualification gaps into targeted training investments that expand eligible coverage."
+  }
+];
+
 function formatRange(startAt: string, endAt: string): string {
   const start = new Date(startAt).toLocaleString();
   const end = new Date(endAt).toLocaleString();
@@ -99,6 +138,109 @@ function formatScheduleTime(value: string): string {
   });
 }
 
+function toDateInputValue(value: Date): string {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function startOfWeek(value: Date): Date {
+  const next = new Date(value);
+  next.setDate(next.getDate() - next.getDay());
+  next.setHours(0, 0, 0, 0);
+  return next;
+}
+
+function endOfWeek(value: Date): Date {
+  const end = addDays(startOfWeek(value), 6);
+  end.setHours(23, 59, 0, 0);
+  return end;
+}
+
+function addDays(value: Date, days: number): Date {
+  const next = new Date(value);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function formatWeekRange(start: Date): string {
+  const end = addDays(start, 6);
+  return `${start.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric"
+  })} - ${end.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric"
+  })}`;
+}
+
+function buildTemplateWindow(dateValue: string, templateId: ScheduleTemplateId): {
+  startAt: string;
+  endAt: string;
+} | null {
+  const template = scheduleTemplates.find((item) => item.id === templateId);
+  if (!template || template.id === "Custom") {
+    return null;
+  }
+
+  const start = new Date(`${dateValue}T00:00`);
+  start.setHours(template.startHour, template.startMinute, 0, 0);
+
+  const end = new Date(start);
+  if ("overnight" in template && template.overnight) {
+    end.setDate(end.getDate() + 1);
+  }
+  end.setHours(template.endHour, template.endMinute, 0, 0);
+
+  return {
+    startAt: toDateTimeLocal(start),
+    endAt: toDateTimeLocal(end)
+  };
+}
+
+function detectTemplateId(shift: Pick<ScheduleShift, "startAt" | "endAt" | "sourceType">): ScheduleTemplateId {
+  if (isScheduleTemplateId(shift.sourceType)) {
+    return shift.sourceType;
+  }
+
+  const start = new Date(shift.startAt);
+  const end = new Date(shift.endAt);
+
+  const matched = scheduleTemplates.find((template) => {
+    if (template.id === "Custom") {
+      return false;
+    }
+
+    const startMatches =
+      start.getHours() === template.startHour && start.getMinutes() === template.startMinute;
+    const endMatches = end.getHours() === template.endHour && end.getMinutes() === template.endMinute;
+    const overnight = end.toDateString() !== start.toDateString();
+
+    return startMatches && endMatches && Boolean("overnight" in template && template.overnight) === overnight;
+  });
+
+  return matched?.id ?? "Custom";
+}
+
+function groupShiftsByDay(shifts: ScheduleShift[]): Array<{ day: string; shifts: ScheduleShift[] }> {
+  const grouped = new Map<string, ScheduleShift[]>();
+
+  for (const shift of shifts) {
+    const day = new Date(shift.startAt).toISOString().slice(0, 10);
+    const bucket = grouped.get(day) ?? [];
+    bucket.push(shift);
+    grouped.set(day, bucket);
+  }
+
+  return Array.from(grouped.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([day, items]) => ({
+      day,
+      shifts: items.sort((left, right) => new Date(left.startAt).getTime() - new Date(right.startAt).getTime())
+    }));
+}
+
 function formatReviewerName(userId?: string | null): string {
   if (!userId) {
     return "Pending review";
@@ -120,47 +262,68 @@ function formatReviewedAt(value?: string | null): string {
   return new Date(value).toLocaleString();
 }
 
+function formatHours(value: number | null): string {
+  if (value === null) {
+    return "N/A";
+  }
+
+  return `${value.toFixed(1)} hrs`;
+}
+
+function trendHeightClass(value: number, maxValue: number): string {
+  const ratio = maxValue === 0 ? 0 : value / maxValue;
+  const bucket = Math.max(1, Math.ceil(ratio * 10));
+  return `trendHeight${Math.min(bucket, 10)}`;
+}
+
 export function App() {
   const now = new Date();
-  const nextWeek = new Date(now);
-  nextWeek.setDate(now.getDate() + 7);
+  const initialWeekStart = startOfWeek(now);
+  const initialWeekEnd = endOfWeek(now);
 
   const [activeUserId, setActiveUserId] = useState("officer1");
-  const [activePage, setActivePage] = useState<"trade" | "schedule">("trade");
+  const [activePage, setActivePage] = useState<"trade" | "schedule" | "analytics">("trade");
   const [userSearch, setUserSearch] = useState("");
   const [myShifts, setMyShifts] = useState<Shift[]>([]);
   const [tradeBoard, setTradeBoard] = useState<Shift[]>([]);
   const [queue, setQueue] = useState<TradeRequest[]>([]);
   const [requestHistory, setRequestHistory] = useState<TradeRequest[]>([]);
+  const [currentValidationByRequest, setCurrentValidationByRequest] = useState<Record<string, CurrentApprovalValidation>>({});
+  const [approvalErrorByRequest, setApprovalErrorByRequest] = useState<Record<string, string>>({});
   const [bypassByRequest, setBypassByRequest] = useState<Record<string, boolean>>({});
   const [bypassReasonByRequest, setBypassReasonByRequest] = useState<Record<string, string>>({});
   const [officers, setOfficers] = useState<Officer[]>([]);
   const [scheduleShifts, setScheduleShifts] = useState<ScheduleShift[]>([]);
+  const [weekCalendarStart, setWeekCalendarStart] = useState(initialWeekStart);
+  const [weekCalendarShifts, setWeekCalendarShifts] = useState<ScheduleShift[]>([]);
   const [scheduleOfficerId, setScheduleOfficerId] = useState("");
-  const [scheduleFrom, setScheduleFrom] = useState(toDateTimeLocal(now));
-  const [scheduleTo, setScheduleTo] = useState(toDateTimeLocal(nextWeek));
+  const [scheduleLocation, setScheduleLocation] = useState("");
+  const [scheduleStatus, setScheduleStatus] = useState<"" | "Assigned" | "Posted">("");
   const [editShiftId, setEditShiftId] = useState<string | null>(null);
   const [formOfficerId, setFormOfficerId] = useState("officer1");
+  const [formShiftDate, setFormShiftDate] = useState(toDateInputValue(now));
+  const [formShiftTemplateId, setFormShiftTemplateId] = useState<ScheduleTemplateId>("0600-1800");
   const [formStartAt, setFormStartAt] = useState(toDateTimeLocal(now));
-  const [formEndAt, setFormEndAt] = useState(toDateTimeLocal(nextWeek));
+  const [formEndAt, setFormEndAt] = useState(toDateTimeLocal(addDays(now, 1)));
   const [formLocation, setFormLocation] = useState("Deer Valley");
   const [formRoleRequired, setFormRoleRequired] = useState("Security Officer");
   const [formArmedRequired, setFormArmedRequired] = useState(false);
   const [formNotes, setFormNotes] = useState("");
   const [isSavingSchedule, setIsSavingSchedule] = useState(false);
+  const [analyticsLocation, setAnalyticsLocation] = useState("");
+  const [analyticsView, setAnalyticsView] = useState<AnalyticsView>("monthly");
+  const [analyticsFrom, setAnalyticsFrom] = useState(toDateInputValue(addDays(now, -28)));
+  const [analyticsTo, setAnalyticsTo] = useState(toDateInputValue(now));
+  const [trendLocation, setTrendLocation] = useState("ALL");
+  const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activePolicyId, setActivePolicyId] = useState<string | null>(null);
+  const [isPolicyModalOpen, setIsPolicyModalOpen] = useState(false);
   const userSearchRef = useRef<HTMLInputElement | null>(null);
 
   const currentUser = useMemo(
     () => userChoices.find((item) => item.id === activeUserId) ?? userChoices[0],
     [activeUserId]
-  );
-
-  const activePolicy = useMemo(
-    () => policyRules.find((policy) => policy.id === activePolicyId) ?? null,
-    [activePolicyId]
   );
 
   const filteredUserChoices = useMemo(() => {
@@ -184,24 +347,72 @@ export function App() {
   }, [activeUserId, filteredUserChoices]);
 
   const scheduleGroupedByDay = useMemo(() => {
-    const grouped = new Map<string, ScheduleShift[]>();
+    return groupShiftsByDay(scheduleShifts);
+  }, [scheduleShifts]);
 
+  const weekCalendarDays = useMemo(() => {
+    return Array.from({ length: 7 }, (_, index) => {
+      const day = addDays(weekCalendarStart, index);
+      const dayKey = day.toISOString().slice(0, 10);
+      const shifts = weekCalendarShifts
+        .filter((shift) => new Date(shift.startAt).toISOString().slice(0, 10) === dayKey)
+        .sort((left, right) => new Date(left.startAt).getTime() - new Date(right.startAt).getTime());
+
+      return { day, dayKey, shifts };
+    });
+  }, [weekCalendarShifts, weekCalendarStart]);
+
+  const officerNameById = useMemo(() => {
+    return new Map(officers.map((officer) => [officer.id, officer.name]));
+  }, [officers]);
+
+  const scheduleLocations = useMemo(() => {
+    const values = new Set<string>(["Deer Valley", "TMC", "JCL", "Hospital (New)"]);
     for (const shift of scheduleShifts) {
-      const day = new Date(shift.startAt).toISOString().slice(0, 10);
-      const bucket = grouped.get(day) ?? [];
-      bucket.push(shift);
-      grouped.set(day, bucket);
+      values.add(shift.location);
+    }
+    for (const shift of weekCalendarShifts) {
+      values.add(shift.location);
+    }
+    return Array.from(values).sort((left, right) => left.localeCompare(right));
+  }, [scheduleShifts, weekCalendarShifts]);
+
+  const currentWeekLabel = useMemo(() => formatWeekRange(weekCalendarStart), [weekCalendarStart]);
+
+  const displayLocations = useMemo(() => {
+    return scheduleLocations;
+  }, [scheduleLocations]);
+
+  const trendLocationOptions = useMemo(() => {
+    if (!analytics) {
+      return [];
     }
 
-    return Array.from(grouped.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([day, shifts]) => ({
-        day,
-        shifts: shifts.sort(
-          (a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime()
-        )
-      }));
-  }, [scheduleShifts]);
+    return analytics.trend.byLocation.map((item) => item.location);
+  }, [analytics]);
+
+  const selectedTrendPoints = useMemo(() => {
+    if (!analytics) {
+      return [];
+    }
+
+    if (trendLocation === "ALL") {
+      return analytics.trend.overall;
+    }
+
+    return analytics.trend.byLocation.find((item) => item.location === trendLocation)?.points ?? [];
+  }, [analytics, trendLocation]);
+
+  const trendMaxPosted = useMemo(() => {
+    const max = selectedTrendPoints.reduce((result, point) => Math.max(result, point.posted), 0);
+    return max > 0 ? max : 1;
+  }, [selectedTrendPoints]);
+
+  useEffect(() => {
+    if (currentUser.role !== "Supervisor" && activePage === "analytics") {
+      setActivePage("trade");
+    }
+  }, [activePage, currentUser.role]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
@@ -229,6 +440,20 @@ export function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  useEffect(() => {
+    if (formShiftTemplateId === "Custom") {
+      return;
+    }
+
+    const window = buildTemplateWindow(formShiftDate, formShiftTemplateId);
+    if (!window) {
+      return;
+    }
+
+    setFormStartAt(window.startAt);
+    setFormEndAt(window.endAt);
+  }, [formShiftDate, formShiftTemplateId]);
 
   async function loadTradeData() {
     setError(null);
@@ -271,9 +496,29 @@ export function App() {
           }
           return next;
         });
+
+        const liveValidationEntries = await Promise.all(
+          pending.map(async (request) => {
+            try {
+              const validation = await getCurrentApprovalValidation(activeUserId, request.id);
+              return [request.id, validation] as const;
+            } catch {
+              return [request.id, null] as const;
+            }
+          })
+        );
+
+        setCurrentValidationByRequest(
+          Object.fromEntries(
+            liveValidationEntries.filter((entry): entry is readonly [string, CurrentApprovalValidation] => entry[1] !== null)
+          )
+        );
+        setApprovalErrorByRequest({});
       } else {
         setQueue([]);
         setRequestHistory([]);
+        setCurrentValidationByRequest({});
+        setApprovalErrorByRequest({});
         setBypassByRequest({});
         setBypassReasonByRequest({});
       }
@@ -283,31 +528,93 @@ export function App() {
     }
   }
 
-    async function loadScheduleData() {
-      setError(null);
+  async function loadScheduleData() {
+    setError(null);
 
-      try {
-        const [officerResult, scheduleResult] = await Promise.all([
-          getOfficers(activeUserId),
-          getSchedule(activeUserId, {
-            officerId: scheduleOfficerId || undefined,
-            from: scheduleFrom,
-            to: scheduleTo
-          })
-        ]);
+    try {
+      const weekEnd = endOfWeek(weekCalendarStart);
+      const [officerResult, scheduleResult] = await Promise.all([
+        getOfficers(activeUserId),
+        getSchedule(activeUserId, {
+          from: weekCalendarStart.toISOString(),
+          to: weekEnd.toISOString()
+        })
+      ]);
 
-        setOfficers(officerResult);
-        setScheduleShifts(scheduleResult);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : "Failed to load schedule";
-        setError(msg);
-      }
+      setOfficers(officerResult);
+      setScheduleShifts(scheduleResult);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to load schedule";
+      setError(msg);
+    }
+  }
+
+  async function loadWeekCalendarData() {
+    setError(null);
+
+    try {
+      const result = await getSchedule(activeUserId, {
+        officerId: scheduleOfficerId || undefined,
+        from: weekCalendarStart.toISOString(),
+        to: endOfWeek(weekCalendarStart).toISOString(),
+        location: scheduleLocation || undefined,
+        status: scheduleStatus || undefined
+      });
+
+      setWeekCalendarShifts(result);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to load weekly calendar";
+      setError(msg);
+    }
+  }
+
+  async function loadAnalyticsData() {
+    if (currentUser.role !== "Supervisor") {
+      setAnalytics(null);
+      return;
     }
 
+    setError(null);
+
+    try {
+      const result = await getAnalytics(activeUserId, {
+        location: analyticsLocation || undefined,
+        view: analyticsView,
+        from: analyticsView === "custom" && analyticsFrom ? `${analyticsFrom}T00:00:00.000Z` : undefined,
+        to: analyticsView === "custom" && analyticsTo ? `${analyticsTo}T23:59:59.000Z` : undefined
+      });
+
+      setAnalytics(result);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to load analytics";
+      setError(msg);
+    }
+  }
+
   useEffect(() => {
-      void loadTradeData();
-      void loadScheduleData();
-    }, [activeUserId]);
+    void loadTradeData();
+    void loadScheduleData();
+  }, [activeUserId, weekCalendarStart]);
+
+  useEffect(() => {
+    void loadWeekCalendarData();
+  }, [activeUserId, weekCalendarStart, scheduleOfficerId, scheduleLocation, scheduleStatus]);
+
+  useEffect(() => {
+    if (currentUser.role === "Supervisor") {
+      void loadAnalyticsData();
+    }
+  }, [activeUserId, currentUser.role, analyticsLocation, analyticsFrom, analyticsTo, analyticsView]);
+
+  useEffect(() => {
+    if (trendLocation === "ALL") {
+      return;
+    }
+
+    if (!trendLocationOptions.includes(trendLocation)) {
+      setTrendLocation("ALL");
+    }
+  }, [trendLocation, trendLocationOptions]);
 
   async function handlePostShift(shiftId: string) {
     setMessage(null);
@@ -341,10 +648,32 @@ export function App() {
   async function handleApprove(requestId: string) {
     setMessage(null);
     setError(null);
+    setApprovalErrorByRequest((prev) => {
+      const next = { ...prev };
+      delete next[requestId];
+      return next;
+    });
 
     try {
       const bypassValidation = bypassByRequest[requestId] ?? false;
       const bypassReason = (bypassReasonByRequest[requestId] ?? "").trim();
+
+      const currentValidation = await getCurrentApprovalValidation(activeUserId, requestId);
+      setCurrentValidationByRequest((prev) => ({
+        ...prev,
+        [requestId]: currentValidation
+      }));
+
+      if (!bypassValidation && !currentValidation.canApprove) {
+        const reasonText = currentValidation.reasons.length > 0
+          ? currentValidation.reasons.join(" ")
+          : "Approval is currently blocked by validation checks.";
+        setApprovalErrorByRequest((prev) => ({
+          ...prev,
+          [requestId]: reasonText
+        }));
+        return;
+      }
 
       if (bypassValidation && !bypassReason) {
         setError("Bypass reason is required when override is enabled.");
@@ -366,10 +695,35 @@ export function App() {
         delete next[requestId];
         return next;
       });
+      setCurrentValidationByRequest((prev) => {
+        const next = { ...prev };
+        delete next[requestId];
+        return next;
+      });
+      setApprovalErrorByRequest((prev) => {
+        const next = { ...prev };
+        delete next[requestId];
+        return next;
+      });
       setMessage("Request approved and shift reassigned.");
       await loadTradeData();
       await loadScheduleData();
     } catch (e) {
+      if (e instanceof ApiError && e.code === "APPROVAL_BLOCKED") {
+        const payload = e.payload as { validation?: CurrentApprovalValidation };
+        const validation = payload.validation;
+        if (validation) {
+          setCurrentValidationByRequest((prev) => ({
+            ...prev,
+            [requestId]: validation
+          }));
+          setApprovalErrorByRequest((prev) => ({
+            ...prev,
+            [requestId]: validation.reasons.join(" ") || "Approval blocked by validation checks."
+          }));
+        }
+      }
+
       const msg = e instanceof Error ? e.message : "Approval failed";
       setError(msg);
     }
@@ -408,7 +762,8 @@ export function App() {
           location: formLocation,
           roleRequired: formRoleRequired,
           armedRequired: formArmedRequired,
-          notes: formNotes || null
+          notes: formNotes || null,
+          sourceType: formShiftTemplateId
         });
         setMessage("Schedule updated.");
       } else {
@@ -419,7 +774,8 @@ export function App() {
           location: formLocation,
           roleRequired: formRoleRequired,
           armedRequired: formArmedRequired,
-          notes: formNotes || undefined
+          notes: formNotes || undefined,
+          sourceType: formShiftTemplateId
         });
         setMessage("Schedule created.");
       }
@@ -428,6 +784,7 @@ export function App() {
       setFormNotes("");
       await loadScheduleData();
       await loadTradeData();
+      await loadWeekCalendarData();
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Unable to save schedule";
       setError(msg);
@@ -437,8 +794,12 @@ export function App() {
   }
 
   function beginEdit(shift: ScheduleShift): void {
+    const templateId = detectTemplateId(shift);
+
     setEditShiftId(shift.id);
     setFormOfficerId(shift.currentOfficerId);
+    setFormShiftDate(toDateInputValue(new Date(shift.startAt)));
+    setFormShiftTemplateId(templateId);
     setFormStartAt(toDateTimeLocal(new Date(shift.startAt)));
     setFormEndAt(toDateTimeLocal(new Date(shift.endAt)));
     setFormLocation(shift.location);
@@ -451,10 +812,8 @@ export function App() {
   function resetScheduleForm(): void {
     setEditShiftId(null);
     setFormOfficerId("officer1");
-    setFormStartAt(toDateTimeLocal(new Date()));
-    const next = new Date();
-    next.setHours(next.getHours() + 8);
-    setFormEndAt(toDateTimeLocal(next));
+    setFormShiftDate(toDateInputValue(new Date()));
+    setFormShiftTemplateId("0600-1800");
     setFormLocation("Deer Valley");
     setFormRoleRequired("Security Officer");
     setFormArmedRequired(false);
@@ -486,7 +845,23 @@ export function App() {
                 className={activePage === "schedule" ? "secondary" : ""}
                 onClick={() => setActivePage("schedule")}
               >
-                Schedule Calendar
+                Calendar
+              </button>
+              {currentUser.role === "Supervisor" ? (
+                <button
+                  type="button"
+                  className={activePage === "analytics" ? "secondary" : ""}
+                  onClick={() => setActivePage("analytics")}
+                >
+                  Analytics
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className={isPolicyModalOpen ? "secondary" : ""}
+                onClick={() => setIsPolicyModalOpen(true)}
+              >
+                Policies
               </button>
             </div>
           </div>
@@ -531,27 +906,8 @@ export function App() {
       </header>
 
       <section className="workspaceLayout">
-        <aside className="card policyCard">
-          <h2>Validation Policies</h2>
-          <nav aria-label="Trade validation rules">
-            <ul className="policyList">
-              {policyRules.map((policy) => (
-                <li key={policy.id}>
-                  <button
-                    className="policyLink"
-                    type="button"
-                    onClick={() => setActivePolicyId(policy.id)}
-                  >
-                    {policy.title}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </nav>
-        </aside>
-
         {activePage === "trade" ? (
-        <div className="grid">
+        <div className="tradeBoardGrid">
           <article className="card">
             <h2>My Shifts</h2>
             <div className="list">
@@ -596,10 +952,27 @@ export function App() {
               <div className="list">
                 {queue.map((request) => (
                   <div className="item" key={request.id}>
+                    {(() => {
+                      const liveValidation = currentValidationByRequest[request.id];
+                      const fallbackPass = request.validations[0]?.overallPass ?? false;
+                      const effectivePass = liveValidation?.canApprove ?? fallbackPass;
+                      const reasons = liveValidation?.reasons ?? [];
+                      const inlineError = approvalErrorByRequest[request.id];
+
+                      return (
+                        <>
                     <div><strong>Request {request.id}</strong></div>
                     <div className="meta">Shift: {request.shift.location} ({request.shift.roleRequired})</div>
                     <div className="meta">From {request.postingOfficerId} to {request.requestingOfficerId}</div>
-                    <div className="meta">Validation: {request.validations[0]?.overallPass ? "PASS" : "FAIL"}</div>
+                    <div className="meta">Current Validation: {effectivePass ? "PASS" : "FAIL"}</div>
+                    {!effectivePass && reasons.length > 0 ? (
+                      <div className="meta validationReasonList">
+                        {reasons.map((reason) => (
+                          <div key={`${request.id}-${reason}`}>• {reason}</div>
+                        ))}
+                      </div>
+                    ) : null}
+                    {inlineError ? <div className="meta inlineApprovalError">{inlineError}</div> : null}
                     <div className="approvalHistory">
                       <div className="meta"><strong>Approval History</strong></div>
                       <div className="meta">Supervisor: {formatReviewerName(request.reviewedBy)}</div>
@@ -640,6 +1013,9 @@ export function App() {
                       <button onClick={() => void handleApprove(request.id)}>Approve</button>
                       <button className="danger" onClick={() => void handleDeny(request.id)}>Deny</button>
                     </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 ))}
                 {queue.length === 0 ? <div className="meta">No pending requests.</div> : null}
@@ -672,10 +1048,28 @@ export function App() {
             </article>
           ) : null}
         </div>
-        ) : (
-        <div className="grid">
+        ) : activePage === "schedule" ? (
+        <div className="grid fullSpanGrid">
           <article className="card">
-            <h2>Schedule Calendar</h2>
+            <h2>Calendar</h2>
+            <div className="calendarHeader">
+              <div>
+                <h3>Weekly Team Calendar</h3>
+                <p className="meta">All officers working for the selected week: {currentWeekLabel}</p>
+              </div>
+              <div className="actionRow weekNav">
+                <button type="button" className="secondary" onClick={() => setWeekCalendarStart((current) => addDays(current, -7))}>
+                  Previous Week
+                </button>
+                <button type="button" className="secondary" onClick={() => setWeekCalendarStart(startOfWeek(new Date()))}>
+                  Current Week
+                </button>
+                <button type="button" className="secondary" onClick={() => setWeekCalendarStart((current) => addDays(current, 7))}>
+                  Next Week
+                </button>
+              </div>
+            </div>
+
             <div className="filterRow">
               <label>
                 Officer
@@ -687,15 +1081,49 @@ export function App() {
                 </select>
               </label>
               <label>
-                From
-                <input type="datetime-local" value={scheduleFrom} onChange={(e) => setScheduleFrom(e.target.value)} />
+                Location
+                <select value={scheduleLocation} onChange={(e) => setScheduleLocation(e.target.value)}>
+                  <option value="">All locations</option>
+                  {scheduleLocations.map((location) => (
+                    <option key={location} value={location}>{location}</option>
+                  ))}
+                </select>
               </label>
               <label>
-                To
-                <input type="datetime-local" value={scheduleTo} onChange={(e) => setScheduleTo(e.target.value)} />
+                Status
+                <select
+                  value={scheduleStatus}
+                  onChange={(e) => setScheduleStatus(e.target.value as "" | "Assigned" | "Posted")}
+                >
+                  <option value="">All statuses</option>
+                  <option value="Assigned">Assigned</option>
+                  <option value="Posted">Posted</option>
+                </select>
               </label>
-              <button type="button" onClick={() => void handleScheduleSearch()}>Refresh</button>
             </div>
+
+            <div className="weekCalendarGrid">
+              {weekCalendarDays.map(({ day, dayKey, shifts }) => (
+                <section key={dayKey} className="weekCalendarDay">
+                  <h4>{formatScheduleDay(day.toISOString())}</h4>
+                  <div className="weekCalendarList">
+                    {shifts.map((shift) => (
+                      <div key={shift.id} className="calendarShiftCard">
+                        <strong>{formatScheduleTime(shift.startAt)} - {formatScheduleTime(shift.endAt)}</strong>
+                        <div className="meta">
+                          {(officerNameById.get(shift.currentOfficerId) ?? shift.currentOfficerId)} • {shift.location}
+                        </div>
+                        <div className="meta">{shift.status}</div>
+                      </div>
+                    ))}
+                    {shifts.length === 0 ? <p className="meta">No officers scheduled.</p> : null}
+                  </div>
+                </section>
+              ))}
+            </div>
+
+            <h3>Detailed Schedule List</h3>
+            <p className="meta">This list shows the full Sunday-to-Saturday schedule for the selected week without weekly team calendar filters.</p>
 
             <div className="timeline">
               {scheduleGroupedByDay.map((group) => (
@@ -736,12 +1164,34 @@ export function App() {
                   </select>
                 </label>
                 <label>
+                  Shift Option
+                  <select value={formShiftTemplateId} onChange={(e) => setFormShiftTemplateId(e.target.value as ScheduleTemplateId)}>
+                    {scheduleTemplates.map((template) => (
+                      <option key={template.id} value={template.id}>{template.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Shift Date
+                  <input type="date" value={formShiftDate} onChange={(e) => setFormShiftDate(e.target.value)} />
+                </label>
+                <label>
                   Start
-                  <input type="datetime-local" value={formStartAt} onChange={(e) => setFormStartAt(e.target.value)} />
+                  <input
+                    type="datetime-local"
+                    value={formStartAt}
+                    onChange={(e) => setFormStartAt(e.target.value)}
+                    disabled={formShiftTemplateId !== "Custom"}
+                  />
                 </label>
                 <label>
                   End
-                  <input type="datetime-local" value={formEndAt} onChange={(e) => setFormEndAt(e.target.value)} />
+                  <input
+                    type="datetime-local"
+                    value={formEndAt}
+                    onChange={(e) => setFormEndAt(e.target.value)}
+                    disabled={formShiftTemplateId !== "Custom"}
+                  />
                 </label>
                 <label>
                   Location
@@ -777,11 +1227,196 @@ export function App() {
             </article>
           ) : null}
         </div>
+        ) : (
+        <div className="grid fullSpanGrid">
+          <article className="card">
+            <h2>Analytics</h2>
+            <div className="filterRow">
+              <label>
+                Location
+                <select value={analyticsLocation} onChange={(e) => setAnalyticsLocation(e.target.value)}>
+                  <option value="">All locations</option>
+                  {displayLocations.map((location) => (
+                    <option key={location} value={location}>{location}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Time View
+                <select value={analyticsView} onChange={(e) => setAnalyticsView(e.target.value as AnalyticsView)}>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="yearly">Yearly</option>
+                  <option value="custom">Custom Range</option>
+                </select>
+              </label>
+              <label>
+                From
+                <input
+                  type="date"
+                  value={analyticsFrom}
+                  onChange={(e) => setAnalyticsFrom(e.target.value)}
+                  disabled={analyticsView !== "custom"}
+                />
+              </label>
+              <label>
+                To
+                <input
+                  type="date"
+                  value={analyticsTo}
+                  onChange={(e) => setAnalyticsTo(e.target.value)}
+                  disabled={analyticsView !== "custom"}
+                />
+              </label>
+              <button type="button" onClick={() => void loadAnalyticsData()}>Refresh</button>
+            </div>
+
+            <div className="analyticsGrid">
+              <section className="analyticsPanel">
+                <h3>Value Goals</h3>
+                <div className="analyticsList">
+                  {analyticsGoals.map((goal, index) => (
+                    <div key={goal.title} className="analyticsListItem">
+                      <strong>{index + 1}. {goal.title}</strong>
+                      <p>{goal.description}</p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="analyticsPanel">
+                <h3>Lead Metrics</h3>
+                <div className="analyticsCards">
+                  <div className="analyticsCard">
+                    <span className="analyticsLabel">Shift Fill Rate</span>
+                    <strong>{analytics?.metrics.shiftFillRate ?? 0}%</strong>
+                    <span className="meta">{analytics?.metrics.filledShiftCount ?? 0} of {analytics?.metrics.postedShiftCount ?? 0} posted shifts filled</span>
+                  </div>
+                  <div className="analyticsCard">
+                    <span className="analyticsLabel">Unfilled Shifts</span>
+                    <strong>{analytics?.metrics.unfilledShiftCount ?? 0}</strong>
+                    <span className="meta">Posted shifts still open in the selected window</span>
+                  </div>
+                  <div className="analyticsCard">
+                    <span className="analyticsLabel">Median Time-to-Fill</span>
+                    <strong>{formatHours(analytics?.metrics.medianTimeToFillHours ?? null)}</strong>
+                    <span className="meta">90th percentile: {formatHours(analytics?.metrics.p90TimeToFillHours ?? null)}</span>
+                  </div>
+                  <div className="analyticsCard">
+                    <span className="analyticsLabel">Approval Cycle</span>
+                    <strong>{formatHours(analytics?.metrics.medianApprovalCycleHours ?? null)}</strong>
+                    <span className="meta">Median time from request submitted to supervisor decision</span>
+                  </div>
+                </div>
+              </section>
+
+              <section className="analyticsPanel">
+                <h3>Policy Denials by Location</h3>
+                <div className="analyticsList">
+                  {(analytics?.policyDenials ?? []).map((item) => (
+                    <div key={item.policy} className="analyticsListItem">
+                      <strong>{item.policy}</strong>
+                      <p>{item.count} denied requests in selected window</p>
+                      <div className="analyticsMiniRows">
+                        {item.locationCounts.map((locationRow) => (
+                          <div key={`${item.policy}-${locationRow.location}`} className="analyticsRow">
+                            <span>{locationRow.location}</span>
+                            <strong>{locationRow.count}</strong>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  {(analytics?.policyDenials.length ?? 0) === 0 ? <p className="meta">No policy denials in the selected window.</p> : null}
+                </div>
+              </section>
+
+              <section className="analyticsPanel">
+                <h3>Pickup Concentration</h3>
+                <div className="analyticsList">
+                  {(analytics?.pickupConcentration ?? []).map((item) => (
+                    <div key={item.officerId} className="analyticsRow">
+                      <span>{officerNameById.get(item.officerId) ?? item.officerId}</span>
+                      <strong>{item.approvals} approvals ({item.share}%)</strong>
+                    </div>
+                  ))}
+                  {(analytics?.pickupConcentration.length ?? 0) === 0 ? <p className="meta">No approved pickups in the selected window.</p> : null}
+                </div>
+              </section>
+
+              <section className="analyticsPanel analyticsPanelWide">
+                <h3>Location Coverage and Armed Ratio</h3>
+                <div className="analyticsTrendTable locationCoverageTable">
+                  <div className="analyticsTrendHeader">Location</div>
+                  <div className="analyticsTrendHeader">Total</div>
+                  <div className="analyticsTrendHeader">Posted</div>
+                  <div className="analyticsTrendHeader">Filled</div>
+                  <div className="analyticsTrendHeader">Unfilled</div>
+                  <div className="analyticsTrendHeader">Armed:Unarmed</div>
+                  {(analytics?.locationCoverage ?? []).flatMap((row) => [
+                    <div key={`${row.location}-location`} className="analyticsTrendCell">{row.location}</div>,
+                    <div key={`${row.location}-total`} className="analyticsTrendCell">{row.shiftCount}</div>,
+                    <div key={`${row.location}-posted`} className="analyticsTrendCell">{row.postedCount}</div>,
+                    <div key={`${row.location}-filled`} className="analyticsTrendCell">{row.filledCount}</div>,
+                    <div key={`${row.location}-unfilled`} className="analyticsTrendCell">{row.unfilledCount}</div>,
+                    <div key={`${row.location}-ratio`} className="analyticsTrendCell">{row.armedToUnarmedRatio}</div>
+                  ])}
+                  {(analytics?.locationCoverage.length ?? 0) === 0 ? <p className="meta">No location coverage data in the selected window.</p> : null}
+                </div>
+              </section>
+
+              <section className="analyticsPanel analyticsPanelWide">
+                <h3>Trend Highlights</h3>
+                <div className="trendToolbar">
+                  <label>
+                    Trend Location
+                    <select value={trendLocation} onChange={(e) => setTrendLocation(e.target.value)}>
+                      <option value="ALL">All locations</option>
+                      {trendLocationOptions.map((location) => (
+                        <option key={location} value={location}>{location}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <div className="trendLegend">
+                  <span><i className="legendSwatch posted" /> Posted</span>
+                  <span><i className="legendSwatch filled" /> Filled</span>
+                  <span><i className="legendSwatch unfilled" /> Unfilled</span>
+                </div>
+
+                <div className="trendChart">
+                  {selectedTrendPoints.map((point) => (
+                    <div key={point.period} className="trendChartGroup">
+                      <div className="trendBars">
+                        <div
+                          className={`trendBar posted ${trendHeightClass(point.posted, trendMaxPosted)}`}
+                          title={`Posted: ${point.posted}`}
+                        />
+                        <div
+                          className={`trendBar filled ${trendHeightClass(point.filled, trendMaxPosted)}`}
+                          title={`Filled: ${point.filled}`}
+                        />
+                        <div
+                          className={`trendBar unfilled ${trendHeightClass(point.unfilled, trendMaxPosted)}`}
+                          title={`Unfilled: ${point.unfilled}`}
+                        />
+                      </div>
+                      <span className="trendLabel">{point.period}</span>
+                      <span className="trendMeta">Fill {point.fillRate}%</span>
+                    </div>
+                  ))}
+                </div>
+                {selectedTrendPoints.length === 0 ? <p className="meta">No trend data in the selected window.</p> : null}
+              </section>
+            </div>
+          </article>
+        </div>
         )}
       </section>
 
-      {activePolicy ? (
-        <div className="policyModalBackdrop" role="presentation" onClick={() => setActivePolicyId(null)}>
+      {isPolicyModalOpen ? (
+        <div className="policyModalBackdrop" role="presentation" onClick={() => setIsPolicyModalOpen(false)}>
           <div
             className="policyModal"
             role="dialog"
@@ -790,12 +1425,19 @@ export function App() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="policyModalHeader">
-              <h3 id="policy-modal-title">{activePolicy.title}</h3>
-              <button type="button" className="secondary" onClick={() => setActivePolicyId(null)}>
+              <h3 id="policy-modal-title">Trade Board Policy Guide</h3>
+              <button type="button" className="secondary" onClick={() => setIsPolicyModalOpen(false)}>
                 Close
               </button>
             </div>
-            <p>{activePolicy.description}</p>
+            <div className="policyModalList">
+              {policyRules.map((policy, index) => (
+                <section key={policy.id} className="policyModalSection">
+                  <h4>{index + 1}. {policy.title}</h4>
+                  <p>{policy.description}</p>
+                </section>
+              ))}
+            </div>
           </div>
         </div>
       ) : null}

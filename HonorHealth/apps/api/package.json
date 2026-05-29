@@ -9,7 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "lint": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "cross-env DATABASE_URL=file:./test.db prisma migrate deploy && cross-env DATABASE_URL=file:./test.db vitest run",
     "test:integration": "cross-env DATABASE_URL=file:./test.db prisma migrate reset --force --skip-generate --skip-seed && cross-env DATABASE_URL=file:./test.db vitest run src/tests/workflow.integration.test.ts && cross-env DATABASE_URL=file:./test.db vitest run src/tests/pagination.integration.test.ts && cross-env DATABASE_URL=file:./test.db vitest run src/tests/notification-dispatch.integration.test.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",

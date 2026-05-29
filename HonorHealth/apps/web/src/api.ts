@@ -1,10 +1,24 @@
 import type {
+  AnalyticsResponse,
+  CurrentApprovalValidation,
   Officer,
   ScheduleShift,
   Shift,
   TradeRequest,
   UserRole
 } from "./types";
+
+export class ApiError extends Error {
+  code?: string;
+  payload?: unknown;
+
+  constructor(message: string, options: { code?: string; payload?: unknown } = {}) {
+    super(message);
+    this.name = "ApiError";
+    this.code = options.code;
+    this.payload = options.payload;
+  }
+}
 
 async function request<T>(
   path: string,
@@ -23,7 +37,10 @@ async function request<T>(
 
   if (!response.ok) {
     const errorBody = await response.json().catch(() => ({}));
-    throw new Error(errorBody.message ?? `Request failed: ${response.status}`);
+    throw new ApiError(errorBody.message ?? `Request failed: ${response.status}`, {
+      code: errorBody.code,
+      payload: errorBody
+    });
   }
 
   return response.json() as Promise<T>;
@@ -75,13 +92,26 @@ export function denyRequest(userId: string, requestId: string): Promise<TradeReq
   return request<TradeRequest>(`/api/trade-requests/${requestId}/deny`, userId, "POST", {});
 }
 
+export function getCurrentApprovalValidation(
+  userId: string,
+  requestId: string
+): Promise<CurrentApprovalValidation> {
+  return request<CurrentApprovalValidation>(`/api/trade-requests/${requestId}/current-validation`, userId);
+}
+
 export function getOfficers(userId: string): Promise<Officer[]> {
   return request<Officer[]>("/api/officers", userId);
 }
 
 export function getSchedule(
   userId: string,
-  options: { officerId?: string; from?: string; to?: string } = {}
+  options: {
+    officerId?: string;
+    from?: string;
+    to?: string;
+    location?: string;
+    status?: "Assigned" | "Posted";
+  } = {}
 ): Promise<ScheduleShift[]> {
   const query = new URLSearchParams();
   if (options.officerId) {
@@ -93,9 +123,42 @@ export function getSchedule(
   if (options.to) {
     query.set("to", options.to);
   }
+  if (options.location) {
+    query.set("location", options.location);
+  }
+  if (options.status) {
+    query.set("status", options.status);
+  }
 
   const suffix = query.toString() ? `?${query.toString()}` : "";
   return request<ScheduleShift[]>(`/api/schedule${suffix}`, userId);
+}
+
+export function getAnalytics(
+  userId: string,
+  options: {
+    location?: string;
+    from?: string;
+    to?: string;
+    view?: "weekly" | "monthly" | "yearly" | "custom";
+  } = {}
+): Promise<AnalyticsResponse> {
+  const query = new URLSearchParams();
+  if (options.location) {
+    query.set("location", options.location);
+  }
+  if (options.from) {
+    query.set("from", options.from);
+  }
+  if (options.to) {
+    query.set("to", options.to);
+  }
+  if (options.view) {
+    query.set("view", options.view);
+  }
+
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return request<AnalyticsResponse>(`/api/analytics${suffix}`, userId);
 }
 
 export function createSchedule(
@@ -108,6 +171,7 @@ export function createSchedule(
     roleRequired: string;
     armedRequired: boolean;
     notes?: string;
+    sourceType?: string;
   }
 ): Promise<ScheduleShift> {
   return request<ScheduleShift>("/api/schedule", userId, "POST", payload);
@@ -125,6 +189,7 @@ export function updateSchedule(
     armedRequired: boolean;
     status: "Assigned" | "Posted";
     notes: string | null;
+    sourceType: string;
   }>
 ): Promise<ScheduleShift> {
   return request<ScheduleShift>(`/api/schedule/${shiftId}`, userId, "PATCH", payload);

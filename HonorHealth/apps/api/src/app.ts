@@ -2,6 +2,7 @@ import cors from "cors";
 import express from "express";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { analyticsRouter } from "./routes/analytics.js";
 import { mockAuth } from "./middleware/auth.js";
 import { errorHandler, notFound } from "./middleware/errors.js";
 import { notificationRouter } from "./routes/notifications.js";
@@ -33,6 +34,7 @@ export function buildApp() {
   app.use(mockAuth);
 
   app.use(healthRouter);
+  app.use("/api", analyticsRouter);
   app.use("/api", shiftRouter);
   app.use("/api", scheduleRouter);
   app.use("/api", tradeRequestRouter);

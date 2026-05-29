@@ -19,9 +19,13 @@ export const shiftRouter = Router();
 
 shiftRouter.get("/my-shifts", requireRole(["Officer", "Supervisor"]), async (req, res) => {
   const officerId = req.user!.id;
+  const now = new Date();
 
   const shifts = await prisma.shift.findMany({
-    where: { currentOfficerId: officerId },
+    where: {
+      currentOfficerId: officerId,
+      endAt: { gte: now }
+    },
     orderBy: { startAt: "asc" }
   });
 

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db/prisma.js";
+import { isAllowedScheduleWindow, scheduleTemplates } from "../domain/scheduleTemplates.js";
 import { requireRole, userDirectory } from "../middleware/auth.js";
 
 const scheduleQuerySchema = z.object({
@@ -8,6 +9,7 @@ const scheduleQuerySchema = z.object({
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
   location: z.string().optional(),
+  status: z.enum(["Assigned", "Posted"]).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(200).default(50)
 });
@@ -20,7 +22,7 @@ const createScheduleSchema = z.object({
   roleRequired: z.string().min(1).default("Security Officer"),
   armedRequired: z.boolean().default(false),
   notes: z.string().max(1000).optional(),
-  sourceType: z.string().max(64).optional()
+  sourceType: z.enum(scheduleTemplates.map((item) => item.id) as [string, ...string[]]).default("Custom")
 });
 
 const updateScheduleSchema = z
@@ -32,7 +34,8 @@ const updateScheduleSchema = z
     roleRequired: z.string().min(1).optional(),
     armedRequired: z.boolean().optional(),
     status: z.enum(["Assigned", "Posted"]).optional(),
-    notes: z.string().max(1000).nullable().optional()
+    notes: z.string().max(1000).nullable().optional(),
+    sourceType: z.enum(scheduleTemplates.map((item) => item.id) as [string, ...string[]]).optional()
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "At least one update field must be provided."
@@ -60,11 +63,11 @@ scheduleRouter.get("/schedule", requireRole(["Officer", "Supervisor"]), async (r
     return;
   }
 
-  const { officerId, from, to, location, page, pageSize } = parsed.data;
+  const { officerId, from, to, location, status, page, pageSize } = parsed.data;
   const whereClause = {
-    ...(req.user!.role === "Officer" ? { currentOfficerId: req.user!.id } : {}),
     ...(officerId ? { currentOfficerId: officerId } : {}),
     ...(location ? { location } : {}),
+    ...(status ? { status } : {}),
     ...(from || to
       ? {
           AND: [
@@ -111,6 +114,14 @@ scheduleRouter.post("/schedule", requireRole(["Supervisor"]), async (req, res) =
     return;
   }
 
+  if (!isAllowedScheduleWindow(payload.startAt, payload.endAt, payload.sourceType)) {
+    res.status(400).json({
+      code: "INVALID_SHIFT_TEMPLATE",
+      message: "Shift time must match one of the allowed schedule options unless Custom is selected."
+    });
+    return;
+  }
+
   const result = await prisma.$transaction(async (tx) => {
     const shift = await tx.shift.create({
       data: {
@@ -122,7 +133,7 @@ scheduleRouter.post("/schedule", requireRole(["Supervisor"]), async (req, res) =
         armedRequired: payload.armedRequired,
         status: "Assigned",
         scheduledById: req.user!.id,
-        sourceType: payload.sourceType ?? "SupervisorCreated",
+        sourceType: payload.sourceType,
         notes: payload.notes,
         lastSyncedAt: new Date()
       }
@@ -166,9 +177,18 @@ scheduleRouter.patch("/schedule/:id", requireRole(["Supervisor"]), async (req, r
 
   const startAt = parsed.data.startAt ?? existing.startAt;
   const endAt = parsed.data.endAt ?? existing.endAt;
+  const sourceType = parsed.data.sourceType ?? existing.sourceType ?? "Custom";
 
   if (endAt <= startAt) {
     res.status(400).json({ code: "INVALID_TIME_RANGE", message: "endAt must be after startAt." });
+    return;
+  }
+
+  if (!isAllowedScheduleWindow(startAt, endAt, sourceType)) {
+    res.status(400).json({
+      code: "INVALID_SHIFT_TEMPLATE",
+      message: "Shift time must match one of the allowed schedule options unless Custom is selected."
+    });
     return;
   }
 
@@ -183,6 +203,7 @@ scheduleRouter.patch("/schedule/:id", requireRole(["Supervisor"]), async (req, r
         roleRequired: parsed.data.roleRequired,
         armedRequired: parsed.data.armedRequired,
         status: parsed.data.status,
+        sourceType: parsed.data.sourceType,
         notes: parsed.data.notes,
         lastSyncedAt: new Date()
       }

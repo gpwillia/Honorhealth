@@ -1,7 +1,10 @@
+import { assignHomeSite, type HomeSite } from "./homeSites.js";
+
 export interface OfficerProfile {
   id: string;
   roles: string[];
   armedQualified: boolean;
+  homeSite: HomeSite;
 }
 
 const generatedProfiles: Record<string, OfficerProfile> = Object.fromEntries(
@@ -13,7 +16,8 @@ const generatedProfiles: Record<string, OfficerProfile> = Object.fromEntries(
       {
         id,
         roles: ["Security Officer"],
-        armedQualified: true
+        armedQualified: true,
+        homeSite: assignHomeSite(id)
       }
     ];
   })
@@ -24,12 +28,14 @@ const directory: Record<string, OfficerProfile> = {
   officerA: {
     id: "officerA",
     roles: ["Security Officer"],
-    armedQualified: false
+    armedQualified: false,
+    homeSite: assignHomeSite("officerA")
   },
   officerB: {
     id: "officerB",
     roles: ["Security Officer"],
-    armedQualified: true
+    armedQualified: true,
+    homeSite: assignHomeSite("officerB")
   }
 };
 

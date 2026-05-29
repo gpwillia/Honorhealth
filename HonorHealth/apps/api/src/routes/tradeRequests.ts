@@ -4,6 +4,100 @@ import { prisma } from "../db/prisma.js";
 import { requireRole } from "../middleware/auth.js";
 import { evaluateTradeRequest } from "../services/validationEngine.js";
 
+interface ValidationDetails {
+  armedRequired?: boolean;
+  officerArmedQualified?: boolean;
+  roleRequired?: string;
+  officerRoles?: string[];
+  hasOverlap?: boolean;
+  existingHours?: number;
+  candidateHours?: number;
+  totalHours?: number;
+  maxHours?: number;
+}
+
+interface ApprovalValidationPayload {
+  requestId: string;
+  canApprove: boolean;
+  checks: {
+    armedCheck: boolean;
+    roleCheck: boolean;
+    restOtCheck: boolean;
+    overallPass: boolean;
+  };
+  reasons: string[];
+  details: ValidationDetails;
+}
+
+class ApprovalBlockedError extends Error {
+  validation: ApprovalValidationPayload;
+
+  constructor(validation: ApprovalValidationPayload) {
+    super("Validation failed. Approval blocked.");
+    this.name = "ApprovalBlockedError";
+    this.validation = validation;
+  }
+}
+
+function parseValidationDetails(details: string): ValidationDetails {
+  try {
+    return JSON.parse(details) as ValidationDetails;
+  } catch {
+    return {};
+  }
+}
+
+function buildValidationPayload(
+  requestId: string,
+  validationComputation: {
+    armedCheck: boolean;
+    roleCheck: boolean;
+    restOtCheck: boolean;
+    overallPass: boolean;
+    details: string;
+  }
+): ApprovalValidationPayload {
+  const details = parseValidationDetails(validationComputation.details);
+  const reasons: string[] = [];
+
+  if (!validationComputation.armedCheck) {
+    reasons.push("Requesting officer is not armed-qualified for this shift.");
+  }
+
+  if (!validationComputation.roleCheck) {
+    reasons.push("Requesting officer does not meet the required role for this shift.");
+  }
+
+  if (!validationComputation.restOtCheck) {
+    if (details.hasOverlap) {
+      reasons.push("Requesting officer has an overlapping same-day shift.");
+    }
+
+    if ((details.totalHours ?? 0) > (details.maxHours ?? 12)) {
+      reasons.push(
+        `Requesting officer exceeds max daily hours (${details.totalHours ?? "?"}/${details.maxHours ?? 12}).`
+      );
+    }
+
+    if (!details.hasOverlap && (details.totalHours ?? 0) <= (details.maxHours ?? 12)) {
+      reasons.push("Requesting officer failed rest/overtime policy checks.");
+    }
+  }
+
+  return {
+    requestId,
+    canApprove: validationComputation.overallPass,
+    checks: {
+      armedCheck: validationComputation.armedCheck,
+      roleCheck: validationComputation.roleCheck,
+      restOtCheck: validationComputation.restOtCheck,
+      overallPass: validationComputation.overallPass
+    },
+    reasons,
+    details
+  };
+}
+
 const createRequestSchema = z.object({
   shiftId: z.string().min(1)
 });
@@ -187,6 +281,47 @@ tradeRequestRouter.get(
   }
 );
 
+tradeRequestRouter.get(
+  "/trade-requests/:id/current-validation",
+  requireRole(["Supervisor"]),
+  async (req, res) => {
+    const payload = await prisma.$transaction(async (tx) => {
+      const request = await tx.tradeRequest.findUnique({ where: { id: req.params.id } });
+
+      if (!request || request.status !== "PendingApproval") {
+        return null;
+      }
+
+      const shift = await tx.shift.findUnique({ where: { id: request.shiftId } });
+
+      if (!shift || shift.status !== "Posted") {
+        return {
+          requestId: request.id,
+          canApprove: false,
+          checks: {
+            armedCheck: false,
+            roleCheck: false,
+            restOtCheck: false,
+            overallPass: false
+          },
+          reasons: ["Shift is no longer posted or available for approval."],
+          details: {}
+        } satisfies ApprovalValidationPayload;
+      }
+
+      const validationComputation = await evaluateTradeRequest(tx, shift, request.requestingOfficerId);
+      return buildValidationPayload(request.id, validationComputation);
+    });
+
+    if (!payload) {
+      res.status(404).json({ code: "NOT_FOUND", message: "Pending request not found." });
+      return;
+    }
+
+    res.json(payload);
+  }
+);
+
 tradeRequestRouter.post(
   "/trade-requests/:id/approve",
   requireRole(["Supervisor"]),
@@ -233,7 +368,7 @@ tradeRequestRouter.post(
         const bypassReason = parsed.data.bypassReason?.trim() || null;
 
         if (!validationComputation.overallPass && !bypassValidation) {
-          throw new Error("Validation failed. Approval blocked.");
+          throw new ApprovalBlockedError(buildValidationPayload(request.id, validationComputation));
         }
 
         await tx.shift.update({
@@ -291,6 +426,15 @@ tradeRequestRouter.post(
 
       res.json(result);
     } catch (error) {
+      if (error instanceof ApprovalBlockedError) {
+        res.status(409).json({
+          code: "APPROVAL_BLOCKED",
+          message: error.message,
+          validation: error.validation
+        });
+        return;
+      }
+
       if (error instanceof Error) {
         res.status(409).json({ code: "APPROVAL_FAILED", message: error.message });
         return;

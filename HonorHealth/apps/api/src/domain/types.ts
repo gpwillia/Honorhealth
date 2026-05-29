@@ -10,4 +10,5 @@ export interface RequestUser {
   id: string;
   role: UserRole;
   name: string;
+  homeSite?: string;
 }
